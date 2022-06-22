@@ -15,7 +15,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 
 public class OrderSimulator {
-    private boolean kafka;
     private String topic;
     private String []symbols;
     private String serverUrl;
@@ -24,16 +23,10 @@ public class OrderSimulator {
     private Throughput throughputWorker;
     private static final Logger LOGGER = LoggerFactory.getLogger(OrderSimulator.class);
 
-    public OrderSimulator(String serverUrl, final String topic, boolean kafka) {
+    public OrderSimulator(String serverUrl, final String topic) {
         this.serverUrl=serverUrl;
         this.topic = topic;
-        this.kafka = kafka;
-        this.service = Executors.newFixedThreadPool(10, new ThreadFactory() {
-            @Override
-            public Thread newThread( Runnable r) {
-                return  new Thread(r, "Order Sending Thread");
-            }
-        });
+        this.service = Executors.newFixedThreadPool(10, r -> new Thread(r, "Order Sending Thread"));
     }
 
     public void startSimulatorInAutomaticMode(final String[] symbols, final String exchange, final String brokerName, final String brokerId, final String clientId, final String clientName, int workers, boolean manualMode, BlockingQueue<Order> inputQueue) throws JMSException {
@@ -41,7 +34,7 @@ public class OrderSimulator {
         for (int i = 0; i < workers; i++) {
             OrderSender senderEMS = new OrderSender(serverUrl, topic, symbols, exchange,
                     brokerName, brokerId, clientId, clientName,
-                    kafka,throughputWorker, manualMode, inputQueue);
+                    throughputWorker, manualMode, inputQueue);
             workerThreads.add(senderEMS);
         }
         workerThreads.forEach(t -> service.submit(t));
@@ -58,7 +51,7 @@ public class OrderSimulator {
     public void startSimulatorInManualMode(final String[] symbols, final String exchange, final String brokerName, final String brokerId, final String clientId, final String clientName, int workers, boolean manualMode,BlockingQueue<Order> inputQueue) throws JMSException {
         workerThreads = new ArrayList<>();
         for (int i = 0; i < workers; i++) {
-            OrderSender senderEMS = new OrderSender(serverUrl, topic, symbols, exchange, brokerName, brokerId, clientId, clientName, kafka,throughputWorker, manualMode, inputQueue);
+            OrderSender senderEMS = new OrderSender(serverUrl, topic, symbols, exchange, brokerName, brokerId, clientId, clientName, throughputWorker, manualMode, inputQueue);
             workerThreads.add(senderEMS);
         }
         workerThreads.forEach(t -> service.submit(t));
