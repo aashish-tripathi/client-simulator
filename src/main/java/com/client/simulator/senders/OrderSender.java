@@ -1,7 +1,6 @@
 package com.client.simulator.senders;
 
 import com.ashish.marketdata.avro.Order;
-import com.client.simulator.broker.EMSBroker;
 import com.client.simulator.broker.KafkaBroker;
 import com.client.simulator.service.PriceRange;
 import com.client.simulator.util.Throughput;
@@ -12,7 +11,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.jms.ExceptionListener;
 import javax.jms.JMSException;
-import javax.jms.TextMessage;
 import java.util.Base64;
 import java.util.Properties;
 import java.util.concurrent.BlockingQueue;
@@ -29,8 +27,6 @@ public class OrderSender implements Runnable, ExceptionListener {
     final private String clientId;
     final private String clientName;
     private PriceRange priceRange;
-    private EMSBroker emsBroker;
-    private boolean kafka;
     private KafkaProducer<String, String> kafkaProducer;
     private Throughput throughput;
     private boolean manualMode;
@@ -41,8 +37,7 @@ public class OrderSender implements Runnable, ExceptionListener {
 
     public OrderSender(String serverUrl, String topic, String[] symbols, String exchange,
                        String brokerName, String brokerId, String clientId, String clientName,
-                       boolean kafka, Throughput throughputWorker,boolean manualMode, BlockingQueue<Order> inputQueue) throws JMSException {
-        this.kafka = kafka;
+                       Throughput throughputWorker, boolean manualMode, BlockingQueue<Order> inputQueue) {
         this.topic = topic;
         this.symbols = symbols;
         this.exchange = exchange;
@@ -50,25 +45,19 @@ public class OrderSender implements Runnable, ExceptionListener {
         this.brokerId = brokerId;
         this.clientId = clientId;
         this.clientName = clientName;
-        if (!kafka) {
-            emsBroker = new EMSBroker(null, null, null);
-            emsBroker.createProducer(topic, true);
-        } else {
-            // safe producer
-            Properties optionalProperties = new Properties();
-            optionalProperties.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
-            optionalProperties.put(ProducerConfig.ACKS_CONFIG, "all");
-            optionalProperties.put(ProducerConfig.RETRIES_CONFIG,Integer.toString(Integer.MAX_VALUE));
-            optionalProperties.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, "5");
+        Properties optionalProperties = new Properties();
+        optionalProperties.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
+        optionalProperties.put(ProducerConfig.ACKS_CONFIG, "all");
+        optionalProperties.put(ProducerConfig.RETRIES_CONFIG, Integer.toString(Integer.MAX_VALUE));
+        optionalProperties.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, "5");
 
-            // high throughput setting
-            optionalProperties.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "snappy");
-            optionalProperties.put(ProducerConfig.LINGER_MS_CONFIG, "20");
-            optionalProperties.put(ProducerConfig.BATCH_SIZE_CONFIG, Integer.toString(32*1024));
-            kafkaProducer = new KafkaBroker(serverUrl).createProducer((optionalProperties)); // create producer
-        }
+        // high throughput setting
+        optionalProperties.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "snappy");
+        optionalProperties.put(ProducerConfig.LINGER_MS_CONFIG, "20");
+        optionalProperties.put(ProducerConfig.BATCH_SIZE_CONFIG, Integer.toString(32 * 1024));
+        kafkaProducer = new KafkaBroker(serverUrl).createProducer((optionalProperties)); // create producer
         this.throughput = throughputWorker;
-        this.manualMode=manualMode;
+        this.manualMode = manualMode;
         this.inputQueue = inputQueue;
         LOGGER.info("Order sending started by client {} ", clientName);
     }
@@ -82,10 +71,10 @@ public class OrderSender implements Runnable, ExceptionListener {
             try {
                 String randomStock = symbols[localRandom.nextInt(symbols.length)];
                 Order newOrder = null;
-                if(manualMode){
+                if (manualMode) {
                     // take it from Queue
                     newOrder = inputQueue.poll();
-                }else{
+                } else {
                     newOrder = OrderCreator.createSingleOrder(randomStock, exchange, brokerName, brokerId, clientId, clientName);
                 }
                 if (newOrder == null) {
@@ -93,30 +82,19 @@ public class OrderSender implements Runnable, ExceptionListener {
                 }
                 byte[] encoded = Utility.serealizeAvroHttpRequestJSON(newOrder);
                 String encodedOrder = Base64.getEncoder().encodeToString(encoded);
-                if (!kafka) {
-                    publishToEMS(newOrder, encodedOrder);
-                } else {
-                    publishToKafka(newOrder, encodedOrder);
-                }
-                Thread.sleep(1000);
+                publishToKafka(newOrder, encodedOrder);
+                Thread.sleep(5000);
                 LOGGER.info("Order {} sent by {}", newOrder, newOrder.getClientName());
-            } catch (JMSException | RuntimeException | InterruptedException e) {
+            } catch (Exception e) {
                 LOGGER.error("Error occurred while sending order " + e.fillInStackTrace());
-                try {
-                    if (e instanceof JMSException) {
-                        emsBroker.closeProducer();
-                    }
-                } catch (JMSException ex) {
-                    LOGGER.error("Error occurred while sending order " + ex.fillInStackTrace());
-                }
             }
             msgCount++;
         }
         LOGGER.warn("Thread {} received shutdown signal ", Thread.currentThread().getName());
         long end = System.currentTimeMillis();
-        long timeT= (end-start)/1000;
+        long timeT = (end - start) / 1000;
         long msgF = msgCount;
-        LOGGER.info("Message rate/sec {}",msgF/timeT);
+        LOGGER.info("Message rate/sec {}", msgF / timeT);
     }
 
     private void publishToKafka(Order newOrder, String encodedOrder) {
@@ -135,12 +113,6 @@ public class OrderSender implements Runnable, ExceptionListener {
                 }
             }
         });
-    }
-
-    private void publishToEMS(Order newOrder, String encodedOrder) throws JMSException {
-        TextMessage message = emsBroker.createMessage();
-        message.setText(encodedOrder);
-        emsBroker.send(message);
     }
 
     public boolean isRunning() {
